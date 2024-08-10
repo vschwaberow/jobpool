@@ -5,19 +5,19 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Set default build type to Release
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Add compiler warnings
 if(MSVC)
   add_compile_options(/W4 /WX)
 else()
   add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 endif()
 
-# Include CPM.cmake
+# Option to choose between static and dynamic library
+option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
+
 set(CPM_DOWNLOAD_VERSION 0.40.2)
 set(CPM_DOWNLOAD_LOCATION "${CMAKE_BINARY_DIR}/cmake/CPM_${CPM_DOWNLOAD_VERSION}.cmake")
 if(NOT (EXISTS ${CPM_DOWNLOAD_LOCATION}))
@@ -29,15 +29,21 @@ if(NOT (EXISTS ${CPM_DOWNLOAD_LOCATION}))
 endif()
 include(${CPM_DOWNLOAD_LOCATION})
 
-# Fetch Boost using CPM
+# Fetch Asio (standalone) using CPM
 CPMAddPackage(
-  NAME Boost
-  VERSION 1.85.0
-  GITHUB_REPOSITORY "boostorg/boost"
-  GIT_TAG "boost-1.85.0"
+  NAME asio
+  VERSION 1.28.0
+  GITHUB_REPOSITORY chriskohlhoff/asio
+  GIT_TAG asio-1-28-0
+  DOWNLOAD_ONLY YES
 )
 
-# Fetch Google Test using CPM
+if(asio_ADDED)
+  add_library(asio INTERFACE)
+  target_include_directories(asio INTERFACE ${asio_SOURCE_DIR}/asio/include)
+  target_compile_definitions(asio INTERFACE ASIO_STANDALONE)
+endif()
+
 CPMAddPackage(
   NAME GoogleTest
   GITHUB_REPOSITORY google/googletest
@@ -48,61 +54,71 @@ CPMAddPackage(
     "gtest_force_shared_crt ON"
 )
 
-# Fetch spdlog using CPM
 CPMAddPackage(
   NAME spdlog
   GITHUB_REPOSITORY gabime/spdlog
   VERSION 1.14.1
 )
 
-# Main executable
-add_executable(complex_tasks_with_dns
+set(INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+# Create the library
+add_library(complex_tasks_lib
   src/job_pool.cc
+)
+
+target_include_directories(complex_tasks_lib PUBLIC ${INCLUDE_DIR})
+target_link_libraries(complex_tasks_lib PUBLIC
+  asio
+  spdlog::spdlog
+)
+
+# Create the example executable
+add_executable(complex_tasks_with_dns
   src/complex_tasks_with_dns.cc
 )
 
-target_include_directories(complex_tasks_with_dns PRIVATE include)
-target_link_libraries(complex_tasks_with_dns PRIVATE
-  Boost::system
-  Boost::asio
-  spdlog::spdlog
-)
+target_link_libraries(complex_tasks_with_dns PRIVATE complex_tasks_lib)
 
-# Tests executable
+# Unit tests
 add_executable(unit_tests
   tests/job_pool_test.cc
   tests/dns_resolver_test.cc
-  src/job_pool.cc
 )
 
-target_include_directories(unit_tests PRIVATE include)
 target_link_libraries(unit_tests PRIVATE
+  complex_tasks_lib
   gtest
   gtest_main
-  Boost::system
-  Boost::asio
-  spdlog::spdlog
 )
 
-# Enable testing
 enable_testing()
 add_test(NAME unit_tests COMMAND unit_tests)
 
-# Install rules
-install(TARGETS complex_tasks_with_dns DESTINATION bin)
-install(FILES include/job_pool.h include/dns_resolver.h DESTINATION include)
+# Installation
+install(TARGETS complex_tasks_lib complex_tasks_with_dns
+  RUNTIME DESTINATION bin
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
+)
+install(FILES ${INCLUDE_DIR}/job_pool.h ${INCLUDE_DIR}/dns_resolver.h DESTINATION include)
 
-# Debug and Release specific flags
+# Compiler options
+target_compile_options(complex_tasks_lib PRIVATE
+  $<$<CONFIG:Debug>:-g -O0>
+  $<$<CONFIG:Release>:-O3>
+)
+
 target_compile_options(complex_tasks_with_dns PRIVATE
-  $<$<CONFIG:Debug>:-g -O0 -Wno-strict-prototypes>
-  $<$<CONFIG:Release>:-O3 -Wno-strict-prototypes>
+  $<$<CONFIG:Debug>:-g -O0>
+  $<$<CONFIG:Release>:-O3>
 )
 
 target_compile_options(unit_tests PRIVATE
-  $<$<CONFIG:Debug>:-g -O0 -Wno-strict-prototypes>
-  $<$<CONFIG:Release>:-O3 -Wno-strict-prototypes>
+  $<$<CONFIG:Debug>:-g -O0>
+  $<$<CONFIG:Release>:-O3>
 )
 
-if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-  add_compile_options(-Wno-strict-prototypes)
+if(UNIX)
+  target_link_libraries(complex_tasks_lib PUBLIC pthread)
 endif()

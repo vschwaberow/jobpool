@@ -41,6 +41,39 @@ After building, run the executable:
 ./build/complex_tasks_with_dns
 ```
 
+## Example
+
+The `complex_tasks_with_dns` application demonstrates the usage of the job pool and DNS resolver.
+It calculates the Fibonacci sequence, prime factorization, and Collatz conjecture for a given number.
+It also resolves the IP address of a given domain name.
+
+Here is an example with ```spdlog``` how to use the domain name resolver:
+
+```cpp
+#include "job_pool.h"
+#include "dns_resolver.h"
+
+std::vector<std::string> hostnames = {
+    "www.google.com", "www.github.com", "www.stackoverflow.com",
+    "www.wikipedia.org", "www.reddit.com"
+};
+std::vector<std::future<std::string>> dns_results(hostnames.size());
+DnsResolver resolver;
+
+for (size_t i = 0; i < hostnames.size(); ++i) {
+    job_pool.AddJob([&resolver, &dns_results, &hostnames, i]() {
+        spdlog::info("Starting DNS resolution for {}", hostnames[i]);
+        dns_results[i] = resolver.resolve(hostnames[i]);
+    });
+}
+
+job_pool.Wait();
+
+for (size_t i = 0; i < hostnames.size(); ++i) {
+    spdlog::info("Resolved IP address for {}: {}", hostnames[i], dns_results[i].get());
+}
+```
+
 ## Tests
 
 This project uses Google Test for unit testing. To run the tests:
